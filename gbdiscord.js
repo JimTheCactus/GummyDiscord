@@ -126,13 +126,34 @@ client.on('message', message => {
     }
 
     console.log('Got message on channel "' + message.channel.name + '" with ID "' + message.channel.id + '" from user "' + getFullName(message.author));
+
+    if (message.isMentioned(client.user)) {
+        var cmdline = message.cleanContent.toLowerCase();
+        console.log(cmdline);
+        var args = cmdline.split(/\s+/);
+        var nick = getFullName(message.author);
+        console.log("STUFF: " + args[1]);
+        if (args[0] && args[1] && args[2]) {
+            if (args[1]=="join") {
+                getNickgroupFromNick(args[2],function(group){
+                    var sql = 'INSERT INTO ' + config.mysql.databaseprefix + 'nickgrouprequests (Nick, Nickgroup) VALUES(?,?) ON DUPLICATE KEY UPDATE NickGroup=?';
+                    sql = mysql.format(sql,[nick,group,group]);
+                    doQuery(sql,function(err,results,fields){
+			if (err) {
+                            message.reply('An error occured. I was unable to create your link request.');
+                            console.log(err);
+                            return;
+			}
+                        message.reply('A link request has been created for you. Log into IRC and send "!gb link auth ' + nick + '" to authorize the request.');
+                    });
+                });
+            }
+        }
+    }
   
     deliverMemosForSender(message);
 
 });
-
-// Do stuff
-
 
 console.log('Connecting to Discord...');
 // Log our bot in
