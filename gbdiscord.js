@@ -3,6 +3,9 @@ const Discord = require('discord.js');
 const fs = require('fs');
 const mysql = require('mysql');
 
+// cache a compiled copy of our argument processor regex
+var commandstart;
+var argprocessor = /\s*(\S+)(\s+|$)/g;
 
 console.log('Loading config...');
 var config = JSON.parse(fs.readFileSync('config.json', 'utf8')); 
@@ -20,6 +23,28 @@ const client = new Discord.Client();
 
 function getFullName(user) {
     return '@' + user.username + '#' + user.discriminator;
+}
+
+function getSenderNickname(message) {
+    if(message.guild) {
+        return new Promise(function (resolve, reject) {
+            message.guild.fetchMember(message.author).then((guildie) => { 
+                if (guildie) {
+                    if (guildie.nickname) {
+                        resolve(guildie.nickname);
+                    } else {
+                        resolve(getFullName(message.author));
+                    }
+                }
+                else {
+                    resolve(getFullName(message.author));
+                }
+            });
+        });
+    }
+    else {
+        return Promise.resolve(getFullName(message.author));
+    }
 }
 
 function doQuery(sql, callback) {
@@ -54,7 +79,8 @@ function getNickgroupFromNick(nick, callback) {
 // from Discord _after_ ready is emitted
 client.on('ready', () => {
     console.log('I am ready!');
-  
+    // Create the regex for finding lines that start with a mention of us.
+    commandstart = new RegExp('^<@'+client.user.id+'>\s*','g');
 });
 
 function deleteMemo(memoid) {
@@ -85,7 +111,6 @@ function deliverMemosForSender(message) {
             sentprivheader = false;
             for(var i=0;i<results.length;i++) {
                 var memo = results[i];
-                console.log('Parsing line ' + i.toString() + ' for memo ID ' + memo.ID.toString());
                 var memotext = '[' + memo.CreatedTime.getFullYear().toString() + '-' + (memo.CreatedTime.getMonth()+1).toString() + '-' + memo.CreatedTime.getDate()
                                 + ' ' + memo.CreatedTime.getHours().toString() + ':' + memo.CreatedTime.getMinutes().toString() + '] '
                                + memo.SourceNick + ': ' + memo.Message;
@@ -113,6 +138,44 @@ function deliverMemosForSender(message) {
   });
 }
 
+function getGreedyDestination(target) {
+    return new Promise(function(resolve,reject) {
+        // If it has the direct delivery prefix
+        if (target.startsWith("-")) {
+            // Trim off the prefix and return that.
+            resolve(target.substring(1).toLowerCase());
+        }
+        else {
+            // Otherwise, grab the 
+            getNickgroupFromNick(target,(group) => {
+                if (group) {
+                    resolve(group);
+                }
+                else {
+                    resolve(target.toLowerCase());
+               }
+    
+            });
+        }
+    });
+}
+
+function add_memo(target, sender, message, mode = null) {
+    return new Promise(function(resolve,reject) {
+        var sql = 'INSERT INTO ' + config.mysql.databaseprefix + 'memos (Nick, SourceNick, DeliveryMode, CreatedTime, Message) VALUES (?,?,?,NOW(),?)';
+
+        sql = mysql.format(sql,[target,sender,mode,message]);
+        doQuery(sql,(err, results, fields) => {
+            if(err) {
+                console.log(err);
+                reject(err);
+            } else {
+                resolve(true);
+            }
+        });
+    });
+}
+
 client.on('message', message => {
     // If this message isn't on our channel of interest, bail.
     if (message.channel.id != config.activechannel && message.channel.type == "text") return;
@@ -120,31 +183,57 @@ client.on('message', message => {
     if (message.author.id == client.user.id) return;
     if (config.ignoredusers) {
         for (var i=0;i<config.ignoredusers.length;i++) {
-            console.log('Checking ' + message.author.id + ' against ' + config.ignoredusers[i]);
             if (message.author.id == config.ignoredusers[i]) return;
         }
     }
 
-    console.log('Got message on channel "' + message.channel.name + '" with ID "' + message.channel.id + '" from user "' + getFullName(message.author));
+    console.log('Got message on channel "' + message.channel.name + '" with ID "' + message.channel.id + '" from user "' + getFullName(message.author) + '"');
 
-    if (message.isMentioned(client.user)) {
-        var cmdline = message.cleanContent.toLowerCase();
-        console.log(cmdline);
-        var args = cmdline.split(/\s+/);
+    // Make sure it starts at the beginning.
+    commandstart.lastIndex=0;
+    // Check if this starts with a mention of us.
+    if (commandstart.test(message.content)) {
+        var cmdline = message.content.substring(commandstart.lastIndex);
+        console.log("Got command: " + cmdline);
+
+        // Reset the argument processor
+        argprocessor.lastIndex=0;
         var nick = getFullName(message.author);
-        console.log("STUFF: " + args[1]);
-        if (args[0] && args[1] && args[2]) {
-            if (args[1]=="join") {
-                getNickgroupFromNick(args[2],function(group){
-                    var sql = 'INSERT INTO ' + config.mysql.databaseprefix + 'nickgrouprequests (Nick, Nickgroup) VALUES(?,?) ON DUPLICATE KEY UPDATE NickGroup=?';
-                    sql = mysql.format(sql,[nick,group,group]);
-                    doQuery(sql,function(err,results,fields){
-			if (err) {
-                            message.reply('An error occured. I was unable to create your link request.');
-                            console.log(err);
-                            return;
-			}
-                        message.reply('A link request has been created for you. Log into IRC and send "!gb link auth ' + nick + '" to authorize the request.');
+        var arg = argprocessor.exec(cmdline);
+        if (arg) {
+            var cmd = arg[1].toLowerCase();
+            if (cmd == "join") {
+                arg = argprocessor.exec(cmdline);
+                if (arg) {
+                    var targetgroup = arg[1];
+                        getNickgroupFromNick(targetgroup,function(group){
+                        var sql = 'INSERT INTO ' + config.mysql.databaseprefix + 'nickgrouprequests (Nick, Nickgroup) VALUES(?,?) ON DUPLICATE KEY UPDATE NickGroup=?';
+                        sql = mysql.format(sql,[nick,group,group]);
+                        doQuery(sql,function(err,results,fields){
+                            if (err) {
+                                message.reply('An error occured. I was unable to create your link request.');
+                                console.log(err);
+                                return;
+                            }
+                            message.reply('A link request has been created for you. Log into IRC and send "!gb link auth ' + nick + '" to authorize the request.');
+                        });
+                    });
+                }
+            }
+            else if (cmd == "memo") {
+                var target = argprocessor.exec(cmdline);
+             
+                var memotext = cmdline.substring(argprocessor.lastIndex);
+                if (memotext.trim() == "") return;
+
+                Promise.all([getGreedyDestination(target[1]),getSenderNickname(message)]).then(args => {
+                    console.log("Sending memo to " + args[0] + " from " + args[1] + " with the text:" + memotext);
+                    add_memo(args[0], args[1], memotext).then((result) => {
+                        message.reply('Memo sent!');
+                    }, err => {
+                        console.log("Error sending memo!");
+                        console.log(err);
+                        message.reply('Error sending memo. Memo was not sent.');
                     });
                 });
             }
@@ -152,7 +241,6 @@ client.on('message', message => {
     }
   
     deliverMemosForSender(message);
-
 });
 
 console.log('Connecting to Discord...');
