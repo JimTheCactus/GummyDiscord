@@ -1,5 +1,7 @@
 # Skip the config with our key and DB info in it.
 config.json
+# Skip the boot script
+bootbot
 
 # Created by https://www.gitignore.io/api/node
 

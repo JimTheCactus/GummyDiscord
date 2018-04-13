@@ -189,6 +189,8 @@ client.on('message', message => {
 
     console.log('Got message on channel "' + message.channel.name + '" with ID "' + message.channel.id + '" from user "' + getFullName(message.author) + '"');
 
+    deliverMemosForSender(message);
+
     // Make sure it starts at the beginning.
     commandstart.lastIndex=0;
     // Check if this starts with a mention of us.
@@ -237,10 +239,12 @@ client.on('message', message => {
                     });
                 });
             }
+            else if (cmd == "ping") {
+                message.reply('*pongs*');
+            }
         }
     }
   
-    deliverMemosForSender(message);
 });
 
 console.log('Connecting to Discord...');
