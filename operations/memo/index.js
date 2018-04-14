@@ -4,7 +4,7 @@ const mysql = require('mysql');
 var conpool;
 
 function doQuery(sql, callback) {
-    console.log('SQL: ' + sql);
+    core.emit('log', 'SQL: ' + sql, core.loglevel.debug);
     conpool.getConnection(function(err,con) {
         if (err) throw err;
             con.query(sql, function(err, results, fields) {
@@ -21,11 +21,11 @@ function getNickgroupFromNick(nick, callback) {
     doQuery(sql,function(err, results, fields) {
         if (err) throw err;
         if (results.length == 0) {
-	    console.log('No group for ' + nick);
+            core.emit('log', 'No group for ' + nick, core.loglevel.debug);
             callback(null);
         }
         else {
-	    console.log(nick + ' is part of ' + results[0].NickGroup);
+            core.emit('log', nick + ' is part of ' + results[0].NickGroup, core.loglevel.debug);
             callback(results[0].NickGroup);
         }
     });
@@ -65,8 +65,8 @@ function add_memo(target, sender, message, mode = null) {
 
         sql = mysql.format(sql,[target,sender,mode,message]);
         doQuery(sql,(err, results, fields) => {
-            if(err) {
-                console.log(err);
+            if (err) {
+                core.emit('log', err, core.loglevel.error);
                 reject(err);
             } else {
                 resolve(true);
@@ -130,13 +130,14 @@ core.on('command_join', function (client, message, cmdline) {
     arg = core.argprocessor.exec(cmdline);
     if (arg) {
         var targetgroup = arg[1];
+        core.emit('log', "joining to " + targetgroup, core.loglevel.info);
         getNickgroupFromNick(targetgroup, function (group) {
             var sql = 'INSERT INTO ' + core.config.mysql.databaseprefix + 'nickgrouprequests (Nick, Nickgroup) VALUES(?,?) ON DUPLICATE KEY UPDATE NickGroup=?';
             sql = mysql.format(sql, [nick, group, group]);
             doQuery(sql, function (err, results, fields) {
                 if (err) {
-                    message.reply('An error occured. I was unable to create your link request.');
-                    console.log(err);
+                    core.emit('log', "Error joining nicks!", core.loglevel.error);
+                    core.emit('log', err, core.loglevel.error);
                     return;
                 }
                 message.reply('A link request has been created for you. Log into IRC and send "!gb link auth ' + nick + '" to authorize the request.');
@@ -152,18 +153,18 @@ core.on('command_memo', function (client, message, cmdline) {
     if (memotext.trim() == "") return;
 
     Promise.all([getGreedyDestination(target[1]), core.getSenderNickname(message)]).then(args => {
-        console.log("Sending memo to " + args[0] + " from " + args[1] + " with the text:" + memotext);
+        core.emit('log', "Sending memo to " + args[0] + " from " + args[1] + " with the text:" + memotext, core.loglevel.info);
         add_memo(args[0], args[1], memotext).then((result) => {
             message.reply('Memo sent!');
         }, err => {
-            console.log("Error sending memo!");
-            console.log(err);
+            core.emit('log', "Error sending memo!", core.loglevel.error);
+            core.emit('log', err, core.loglevel.error);
             message.reply('Error sending memo. Memo was not sent.');
         });
     });
 });
 
-console.log('Connecting to database server...');
+core.emit('log','Connecting to database server...',core.loglevel.info);
 conpool = mysql.createPool({
     host: core.config.mysql.hostname,
     user: core.config.mysql.user,
@@ -173,4 +174,5 @@ conpool = mysql.createPool({
 
 core.on('channel_message', process_message);
 
-console.log('Memo module initialized.');
+core.emit('log', 'Memo module initialized.', core.loglevel.info);
+
