@@ -4,9 +4,9 @@
   "description": "Discorded*Gummy. A chat bot to handle common bot tasks for the MLP-ATG Discord server",
   "main": "gbdiscord.js",
   "dependencies": {
-    "bufferutil": "^3.0.2",
-    "discord.js": "^11.2.1",
-    "snekfetch": "^3.5.2",
+    "bufferutil": "^3.0.3",
+    "discord.js": "^11.4.2",
+    "snekfetch": "^4.0.4",
     "supervisor": "^0.12.0"
   },
   "scripts": {
